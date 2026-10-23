@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const defaultWindowSize = 60 // 60 seconds window size
+
 // RateCalc tracks request timing and computes throughput
 // for use in adaptive retry/backoff decisions.
 type RateCalc struct {
@@ -14,40 +16,49 @@ type RateCalc struct {
 	head   int
 	count  int
 	cap    int
+	windowSize time.Duration
 }
 
+// rateSample stores the time of the sample and the number of requests.
 type rateSample struct {
 	t time.Time
-	n int // number of requests in this sample
+	n int
 }
 
-// NewRateCalc creates a calculator that keeps up to size samples.
-func NewRateCalc(size int) *RateCalc {
+// NewRateCalc creates a calculator with a default window size of 60 seconds.
+func NewRateCalc() *RateCalc {
+	return &RateCalc{
+		windowSize: defaultWindowSize,
+		cap:        defaultWindowSize / 10, // keep 6 samples per second
+		window:     make([]rateSample, defaultWindowSize/10),
+	}
+}
+
+// NewRateCalcWithSize creates a calculator with a custom window size.
+func NewRateCalcWithSize(size int) *RateCalc {
 	if size < 1 {
-		size = 100
+		size = defaultWindowSize
 	}
 	return &RateCalc{
-		window: make([]rateSample, size),
-		cap:    size,
+		windowSize: time.Duration(size),
+		cap:        size / 10, // keep 10 samples per second
+		window:     make([]rateSample, size/10),
 	}
 }
 
-// Record adds n requests at the given time.
-// If t.IsZero(), time.Now() is used.
-func (rc *RateCalc) Record(n int, t time.Time) {
-	if t.IsZero() {
-		t = time.Now()
+// Record adds n requests at the given time, only keeping samples within the window.
+func (rc *RateCalc) Record(n int) {
+	now := time.Now()
+	if now.Sub(rc.window[rc.head].t) >= rc.windowSize {
+		// Remove old samples from the front.
+		rc.count -= len(rc.window) - rc.head
+		rc.head = 0
 	}
-	if n < 1 {
-		n = 1
-	}
-	rc.mu.Lock()
-	rc.window[rc.head] = rateSample{t: t, n: n}
-	rc.head = (rc.head + 1) % rc.cap
+	rc.window[rc.head] = rateSample{t: now, n: n}
 	if rc.count < rc.cap {
 		rc.count++
 	}
-	rc.mu.Unlock()
+	rc.head = (rc.head + 1) % rc.cap
 }
 
 // Throughput returns the estimated requests per second over the window.
@@ -58,54 +69,20 @@ func (rc *RateCalc) Throughput() float64 {
 	if rc.count < 2 {
 		return 0
 	}
-	oldest := rc.window[(rc.head-rc.count+rc.cap)%rc.cap]
-	newest := rc.window[(rc.head-1+rc.cap)%rc.cap]
-	elapsed := newest.t.Sub(oldest.t)
-	if elapsed <= 0 {
-		return 0
-	}
 	var total int
 	for i := 0; i < rc.count; i++ {
-		idx := (rc.head - rc.count + i + rc.cap) % rc.cap
-		total += rc.window[idx].n
+		total += rc.window[(rc.head+i)%rc.cap].n
 	}
-	return float64(total) / elapsed.Seconds()
+	return float64(total) / rc.windowSize.Seconds()
 }
 
-// WeightedThroughput computes throughput with exponential weighting,
-// giving more weight to recent samples. Returns 0 if insufficient data.
-func (rc *RateCalc) WeightedThroughput(alpha float64) float64 {
-	if alpha <= 0 || alpha >= 1 {
-		alpha = 0.3
-	}
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	if rc.count < 2 {
-		return 0
-	}
-	var weightSum float64
-	var valueSum float64
-	for i := 0; i < rc.count; i++ {
-		idx := (rc.head - rc.count + i + rc.cap) % rc.cap
-		weight := math.Pow(1-alpha, float64(rc.count-1-i))
-		weightSum += weight
-		valueSum += weight * float64(rc.window[idx].n)
-	}
-	// estimate total time from oldest to newest sample
-	oldest := rc.window[(rc.head-rc.count+rc.cap)%rc.cap]
-	newest := rc.window[(rc.head-1+rc.cap)%rc.cap]
-	elapsed := newest.t.Sub(oldest.t).Seconds()
-	if elapsed <= 0 {
-		return 0
-	}
-	avgWeighted := valueSum / weightSum
-	return avgWeighted / elapsed
-}
-
-// Reset clears all recorded samples.
+// Reset clears all recorded samples and resets the window size.
 func (rc *RateCalc) Reset() {
 	rc.mu.Lock()
 	rc.head = 0
 	rc.count = 0
 	rc.mu.Unlock()
+	rc.windowSize = defaultWindowSize
+	rc.cap = defaultWindowSize / 10
+	rc.window = make([]rateSample, defaultWindowSize/10)
 }
