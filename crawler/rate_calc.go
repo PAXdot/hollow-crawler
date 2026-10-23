@@ -7,33 +7,41 @@ import (
 )
 
 // RateCalc tracks request timing and computes throughput
-// for use in adaptive retry/backoff decisions.
+// for use in adaptive retry/backoff decisions. It also emits events when proxy rotation occurs.
 type RateCalc struct {
 	mu     sync.Mutex
 	window []rateSample
 	head   int
 	count  int
 	cap    int
+	rotateCh chan struct{}
 }
 
+// rateSample holds the timestamp and number of requests for a sample.
 type rateSample struct {
 	t time.Time
-	n int // number of requests in this sample
+	n int
 }
 
-// NewRateCalc creates a calculator that keeps up to size samples.
+// NewRateCalc creates a calculator that keeps up to size samples and emits ProxyRotate events.
 func NewRateCalc(size int) *RateCalc {
 	if size < 1 {
 		size = 100
 	}
-	return &RateCalc{
+	rc := &RateCalc{
 		window: make([]rateSample, size),
 		cap:    size,
+		rotateCh: make(chan struct{}),
 	}
+	go func() {
+		for range rc.rotateCh {
+			emitEvent(ProxyRotate)
+		}
+	}()
+	return rc
 }
 
-// Record adds n requests at the given time.
-// If t.IsZero(), time.Now() is used.
+// Record adds n requests at the given time. It emits a ProxyRotate event if the head pointer wraps around.
 func (rc *RateCalc) Record(n int, t time.Time) {
 	if t.IsZero() {
 		t = time.Now()
@@ -46,6 +54,9 @@ func (rc *RateCalc) Record(n int, t time.Time) {
 	rc.head = (rc.head + 1) % rc.cap
 	if rc.count < rc.cap {
 		rc.count++
+		if rc.head == 0 {
+			rc.rotateCh <- struct{}{}
+		}
 	}
 	rc.mu.Unlock()
 }
@@ -102,10 +113,14 @@ func (rc *RateCalc) WeightedThroughput(alpha float64) float64 {
 	return avgWeighted / elapsed
 }
 
-// Reset clears all recorded samples.
+// Reset clears all recorded samples and stops the proxy rotation event emitter.
 func (rc *RateCalc) Reset() {
 	rc.mu.Lock()
 	rc.head = 0
 	rc.count = 0
+	close(rc.rotateCh)
 	rc.mu.Unlock()
 }
+
+// ProxyRotate is an event emitted when a proxy rotation occurs.
+type ProxyRotate struct{}
