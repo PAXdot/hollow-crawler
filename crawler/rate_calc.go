@@ -2,20 +2,21 @@ package crawler
 
 import (
 	"math"
+	"net/url"
 	"sync"
 	"time"
-)
 
-const defaultWindowSize = 60 // 60 seconds window size
+	"golang.org/x/net/html"
+)
 
 // RateCalc tracks request timing and computes throughput
 // for use in adaptive retry/backoff decisions.
 type RateCalc struct {
 	mu     sync.Mutex
-	window []rateSample
-	head   int
-	count  int
-	cap    int
+.window   []rateSample
+	head    int
+	count   int
+	cap     int
 	windowSize time.Duration
 }
 
@@ -85,4 +86,15 @@ func (rc *RateCalc) Reset() {
 	rc.windowSize = defaultWindowSize
 	rc.cap = defaultWindowSize / 10
 	rc.window = make([]rateSample, defaultWindowSize/10)
+}
+
+// NormalizeEntities normalizes HTML entities extracted from URLs, to enable better deduplication.
+func (rc *RateCalc) NormalizeEntities(u string) (string, error) {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "", err
+	}
+	normalized := parsed.String()
+	normalized = html.UnescapeString(normalized)
+	return normalized, nil
 }
