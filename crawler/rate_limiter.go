@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -24,7 +25,7 @@ func NewRateLimiter(rateLimit int, rateLimitPeriod time.Duration) *RateLimiter {
 }
 
 // AllowRequest checks if a request can be made without exceeding the rate limit.
-func (rl *RateLimiter) AllowRequest() bool {
+func (rl *RateLimiter) AllowRequest() (bool, string) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 
@@ -33,11 +34,11 @@ func (rl *RateLimiter) AllowRequest() bool {
 		retryPeriod := (rl.rateLimitPeriod - elapsedTime) / time.Second
 		time.Sleep(retryPeriod)
 		rl.retryAttempts++
-		return false
+		return false, fmt.Sprintf("Rate limit exceeded. Retrying in %v seconds (%v attempts)", retryPeriod.Seconds(), rl.retryAttempts)
 	}
 
 	rl.lastSuccess = time.Now()
-	return true
+	return true, ""
 }
 
 // ResetRetryCount resets the retry attempt count.
