@@ -8,10 +8,10 @@ import (
 )
 
 type Page struct {
-	URL      string
-	Content  []byte
-	Hash     [32]byte
-	Metadata map[string]interface{}
+	URL      string          `json:"url"`
+	Content  []byte          `json:"content"`
+	Hash     [32]byte        `json:"-"`
+	Metadata map[string]interface{} `json:"metadata"`
 }
 
 func SerializePage(page *Page) ([]byte, error) {
