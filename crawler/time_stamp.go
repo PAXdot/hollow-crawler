@@ -7,23 +7,33 @@ import (
 	"time"
 )
 
-// TimeStamp extracts and formats the timestamp from a HTML string.
-// It looks for the earliest 'datetime' attribute in 'time' tags.
-// If none found, it returns an empty string. If the parsed time is in the future,
-// it returns a message indicating that the timestamp is invalid.
+// TimeStamp extracts and formats the earliest valid timestamp from a HTML string.
+// It searches for 'datetime' attributes in 'time' tags, preferring the earliest.
+// If none found or all are invalid, it returns an empty string.
 func TimeStamp(htmlStr string) string {
-	reg := regexp.MustCompile(`<time\s[^>]*(?:\s+datetime="?([^"]+)")?`)
-	matches := reg.FindStringSubmatch(htmlStr)
-	if len(matches) < 2 {
+	reg := regexp.MustCompile(`<time\s[^>]*(?:datetime="?([^"]+)")?`)
+	matches := reg.FindAllStringSubmatch(htmlStr, -1)
+	if len(matches) == 0 {
 		return ""
 	}
-	dtStr := matches[1]
-	if dtStr == "" {
-		return ""
+
+	var earliestTime time.Time
+	for _, match := range matches {
+		if match[1] == "" {
+			continue
+		}
+		dt, err := time.Parse(time.RFC3339, match[1])
+		if err != nil || dt.After(time.Now()) {
+			continue
+		}
+		if earliestTime.IsZero() || dt.Before(earliestTime) {
+			earliestTime = dt
+		}
 	}
-	dt, err := time.Parse(time.RFC3339, dtStr)
-	if err != nil || dt.After(time.Now()) {
-		return "Invalid timestamp"
+
+	if !earliestTime.IsZero() {
+		return fmt.Sprintf("Published on %s", html.EscapeString(earliestTime.Format("January 2, 2006 15:04:05 MST")))
 	}
-	return fmt.Sprintf("Published on %s", html.EscapeString(dt.Format("January 2, 2006 15:04:05 MST")))
+
+	return ""
 }
