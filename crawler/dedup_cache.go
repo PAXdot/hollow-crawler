@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"sync"
+	"sync/timeoutsync"
 	"time"
 )
 
