@@ -1,7 +1,6 @@
 package crawler
 
 import (
-	"encoding/hex"
 	"sync"
 	"time"
 )
@@ -31,9 +30,4 @@ func (t *userAgentPoolsTimestamp) GetTimestamp(poolID string) time.Time {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.timestamps[poolID]
-}
-
-// GetTimestampHex returns the timestamp for the given user agent pool as a hexadecimal string.
-func (t *userAgentPoolsTimestamp) GetTimestampHex(poolID string) string {
-	return hex.EncodeToString([]byte(t.GetTimestamp(poolID).Format(time.RFC3339)))
 }
