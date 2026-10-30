@@ -5,66 +5,62 @@ import (
 	"time"
 )
 
-// ProxyScore struct to store proxy score and last used time
-type ProxyScore struct {
-	Score     float64
-	LastUsed  time.Time
-}
+// ...
 
-// ProxyScorer service for managing and scoring proxies
-type ProxyScorer struct {
-	proxies    map[string]ProxyScore
-	proxyMutex sync.Mutex
-}
-
-// NewProxyScorer creates a new ProxyScorer instance
-func NewProxyScorer() *ProxyScorer {
-	return &ProxyScorer{
-		proxies: make(map[string]ProxyScore),
-	}
-}
-
-// UpdateScore updates the score of a proxy based on success or failure
-func (ps *ProxyScorer) UpdateScore(proxyID string, success bool) {
+// GetBestProxyOrRetry returns the proxy with the highest score that has not been
+// used recently. If no such proxy is found, it retries with an exponential backoff.
+func (ps *ProxyScorer) GetBestProxyOrRetry(maxIdleTime time.Duration, maxRetries int, backoffBase time.Duration) (string, bool, error) {
 	ps.proxyMutex.Lock()
 	defer ps.proxyMutex.Unlock()
 
-	score, ok := ps.proxies[proxyID]
-	if !ok {
-		score = ProxyScore{Score: 0, LastUsed: time.Now()}
-	}
+	var bestProxy string
+	var bestScore float64
+	var retries int
 
-	if success {
-		score.Score += 0.1
-	} else {
-		score.Score -= 0.1
-	}
-	score.LastUsed = time.Now()
-
-	ps.proxies[proxyID] = score
-}
-
-// GetBestProxy returns the proxy with the highest score that has not been used recently
-func (ps *ProxyScorer) GetBestProxy(maxIdleTime time.Duration) (string, bool) {
-	ps.proxyMutex.Lock()
-	defer ps.proxyMutex.Unlock()
-
- var bestProxy string
- var bestScore float64
- for proxyID, score := range ps.proxies {
-	 if time.Since(score.LastUsed) <= maxIdleTime && score.Score > bestScore {
-			bestProxy = proxyID
-			bestScore = score.Score
+	for retries < maxRetries {
+		for proxyID, score := range ps.proxies {
+			if time.Since(score.LastUsed) <= maxIdleTime && score.Score > bestScore {
+				bestProxy = proxyID
+				bestScore = score.Score
+			}
 		}
+
+		if bestScore > 0 {
+			return bestProxy, bestScore > 0, nil
+		}
+
+		time.Sleep(backoffBase.Microseconds() * time.Microsecond)
+		backoffBase *= 2
+		retries++
 	}
 
-	return bestProxy, bestScore > 0
+	return "", false, ErrNoValidProxy
 }
 
-// RemoveProxyFromCache removes a proxy from the score cache
-func (ps *ProxyScorer) RemoveProxyFromCache(proxyID string) {
-	ps.proxyMutex.Lock()
-	defer ps.proxyMutex.Unlock()
+// retryWithBackoff retries a function with an exponential backoff until it succeeds
+// or reaches the maximum number of retries.
+func (ps *ProxyScorer) retryWithBackoff(maxRetries int, backoffBase time.Duration, fn func() (string, bool, error)) (string, bool, error) {
+	for retries := 0; retries < maxRetries; retries++ {
+		result, isSuccess, err := fn()
+		if isSuccess || err == nil {
+			return result, isSuccess, err
+		}
 
-	delete(ps.proxies, proxyID)
+		time.Sleep(backoffBase.Microseconds() * time.Microsecond)
+		backoffBase *= 2
+	}
+
+	return "", false, ErrMaxRetriesExceeded
+}
+
+// ErrNoValidProxy is returned when no valid proxy is found after retrying.
+var ErrNoValidProxy = &Error{Code: "NO_VALID_PROXY", Message: "No valid proxy found after retrying"}
+
+// ErrMaxRetriesExceeded is returned when the maximum number of retries is exceeded.
+var ErrMaxRetriesExceeded = &Error{Code: "MAX_RETRIES_EXCEEDED", Message: "Maximum number of retries exceeded"}
+
+// Error represents an error returned by the crawler.
+type Error struct {
+	Code    string
+	Message string
 }
