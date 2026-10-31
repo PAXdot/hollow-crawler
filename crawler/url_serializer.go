@@ -1,4 +1,4 @@
-// url_serializer.go
+//go:generate go run generate.go
 
 package crawler
 
@@ -50,7 +50,7 @@ func (s *URLSerializer) Deserialize(srcPath string) ([]string, error) {
 	return urls, nil
 }
 
-func (s *URLSerializer) Load URLsFromFile(filePath string) ([]string, error) {
+func (s *URLSerializer) LoadURLsFromFile(filePath string) ([]string, error) {
 	_, filename := filepath.Split(filePath)
 	if filename == "" {
 		return nil, ErrInvalidFilePath
@@ -59,7 +59,7 @@ func (s *URLSerializer) Load URLsFromFile(filePath string) ([]string, error) {
 	return s.Deserialize(filePath)
 }
 
-func (s *URLSerializer) Save URLsToFile(urls []string, filePath string) error {
+func (s *URLSerializer) SaveURLsToFile(urls []string, filePath string) error {
 	_, filename := filepath.Split(filePath)
 	if filename == "" {
 		return ErrInvalidFilePath
