@@ -36,10 +36,27 @@ func (s ProxySerializer) Deserialize(data string) (*Proxy, error) {
 
 // Proxy represents a proxy with its address and properties.
 type Proxy struct {
-	IP       net.IP
-	Port     int
-	Scheme   string
-	Type     string
-	Username string
-	Password string
+	IP       string `json:"ip"` // Use string for IP to make it human-readable
+	Port     int    `json:"port"`
+	Scheme   string `json:"scheme"`
+	Type     string `json:"type"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"-"` // Exclude password from JSON output
+}
+
+func (p *Proxy) MarshalJSON() ([]byte, error) {
+	type ProxyAlias Proxy
+	_ = (*ProxyAlias)(p)
+	return json.Marshal(ProxyAlias(p))
+}
+
+func (p *Proxy) UnmarshalJSON(data []byte) error {
+	type ProxyAlias Proxy
+	alias := &ProxyAlias{}
+	err := json.Unmarshal(data, &alias)
+	if err != nil {
+		return err
+	}
+	*p = Proxy(alias)
+	return nil
 }
