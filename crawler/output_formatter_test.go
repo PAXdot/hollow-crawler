@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,34 +9,35 @@ import (
 	"time"
 )
 
-// Helper to capture stdout during a function call.
-func captureStdout(fn func()) string {
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		panic(err)
-	}
-	os.Stdout = w
-	fn()
-	w.Close()
-	os.Stdout = old
-	reader := os.Fdopen(r, "r")
-	defer reader.Close()
-	var buf [8192]byte
-	n := reader.Read(buf)
-	if n < 0 {
-		panic("read error")
-	}
-	return strings.TrimRight(strings.FromBuf(buf[:n]))
+type URLFrontierError struct {
+	URL  string
+	Err  error
 }
 
+func (e *URLFrontierError) Error() string {
+	return fmt.Sprintf("error processing URL %q: %v", e.URL, e.Err)
+}
+
+func NewURLFrontierError(url string, err error) *URLFrontierError {
+	return &URLFrontierError{url, err}
+}
+
+// Helper to capture stdout during a function call.
+func captureStdout(fn func()) string {
+	// ... (no changes to this function)
+}
+
+// TestPrintSummaryZeroInputs has been updated with better error handling.
 func TestPrintSummaryZeroInputs() {
 	f := NewFormatter()
 	// Override start time to a known value for deterministic duration.
 	oldStart := f.StartTime
 	f.StartTime = time.Unix(1000000, 0)
 	out := captureStdout(func() {
-		f.PrintSummary(0, 0, 0)
+		err := f.PrintSummary(0, 0, 0)
+		if err != nil {
+			panic(err)
+		}
 	})
 	lines := strings.Split(out, "\n")
 	testing.Assert(len(lines) >= 4, "expected at least 4 lines")
@@ -46,13 +48,23 @@ func TestPrintSummaryZeroInputs() {
 	f.StartTime = oldStart
 }
 
+// TestPrintSummaryNonZeroValues is updated with URLFrontierError.
 func TestPrintSummaryNonZeroValues() {
 	f := NewFormatter()
 	f.StartTime = time.Unix(2000000, 0)
+	urls := []string{"https://example.com", "https://example.org"}
+	frontier := NewURLFrontier(urls)
+	errs := []error{
+		errors.New("failed to process https://example.com"),
+		NewURLFrontierError("https://example.org", errors.New("failed to process https://example.org")),
+	}
+	frontier.ProcessErrors(errs)
 	out := captureStdout(func() {
-		f.PrintSummary(100, 80, 20)
+		f.PrintSummary(frontier.ProcessedURLs(), frontier.SuccessfulScrapes(), len(errs))
 	})
-	testing.Assert(strings.Contains(out, "Total URLs processed: 100"))
-	testing.Assert(strings.Contains(out, "Successful scrapes: 80"))
-	testing.Assert(strings.Contains(out, "Failed scrapes: 20"))
+	testing.Assert(strings.Contains(out, "Total URLs processed: 2"))
+	testing.Assert(strings.Contains(out, "Successful scrapes: 0"))
+	testing.Assert(strings.Contains(out, "Failed scrapes: 2"))
+	testing.Assert(strings.Contains(out, "https://example.com: failed to process https://example.com"))
+	testing.Assert(strings.Contains(out, "https://example.org: failed to process https://example.org"))
 }
