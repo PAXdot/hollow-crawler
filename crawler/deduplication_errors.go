@@ -3,7 +3,37 @@ package crawler
 import (
 	"errors"
 	"fmt"
+
+	"gopkg.in/yaml.v2"
 )
+
+// Config is the configuration struct for deduplication and export pipelines.
+type Config struct {
+	Deduplication struct {
+		HashAlgorithm string `yaml:"hash_algorithm"`
+		CacheSize     int    `yaml:"cache_size"`
+	} `yaml:"deduplication"`
+	Export struct {
+		Enabled bool   `yaml:"enabled"`
+		Format  string `yaml:"format"`
+	} `yaml:"export"`
+}
+
+// LoadConfig reads the configuration file.
+func LoadConfig(filename string) (*Config, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var c Config
+	err = yaml.Unmarshal(data, &c)
+	if err != nil {
+		return nil, err
+	}
+
+	return &c, nil
+}
 
 // DeduplicationError is a manifestation of an error during the deduplication process.
 type DeduplicationError struct {
@@ -52,3 +82,4 @@ var ErrDeduplicationCachePutError = &DeduplicationError{
 var ErrDeduplicationScorerError = &DeduplicationError{
 	err: errors.New("failed to score document for deduplication"),
 }
+```
