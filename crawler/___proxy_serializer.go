@@ -1,5 +1,3 @@
-// crawler/proxy_serializer.go
-
 package crawler
 
 import (
@@ -7,15 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 )
 
 // ProxySerializer implements a simple JSON serialization for Proxy.
 type ProxySerializer struct{}
 
-// Serialize converts a Proxy to a JSON string.
+// Serialize converts a Proxy to a JSON string. It checks if the proxy is valid before serialization.
 func (s ProxySerializer) Serialize(p *Proxy) (string, error) {
-	if p == nil {
-		return "", errors.New("cannot serialize nil proxy")
+	if err := validateProxy(p); err != nil {
+		return "", err
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -30,6 +29,9 @@ func (s ProxySerializer) Deserialize(data string) (*Proxy, error) {
 	err := json.Unmarshal([]byte(data), &p)
 	if err != nil {
 		return nil, fmt.Errorf("json unmarshal failed: %v", err)
+	}
+	if err := validateProxy(&p); err != nil {
+		return nil, err
 	}
 	return &p, nil
 }
@@ -58,5 +60,22 @@ func (p *Proxy) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*p = Proxy(alias)
+	return nil
+}
+
+// validateProxy checks if the proxy is valid.
+func validateProxy(p *Proxy) error {
+	if p == nil {
+		return errors.New("cannot serialize nil proxy")
+	}
+	if p.IP == "" || p.Port == 0 || p.Scheme == "" || p.Type == "" {
+		return errors.New("invalid proxy: missing field(s)")
+	}
+	if _, err := net.ResolveTCPAddr(p.Scheme, fmt.Sprintf("%s:%d", p.IP, p.Port)); err != nil {
+		return fmt.Errorf("invalid proxy address: %v", err)
+	}
+	if _, err := regexp.MatchString(`^(http|https)$`, p.Scheme); err != nil {
+		return fmt.Errorf("invalid scheme: %s", p.Scheme)
+	}
 	return nil
 }
