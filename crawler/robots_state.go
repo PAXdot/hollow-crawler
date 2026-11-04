@@ -53,17 +53,20 @@ func (rs *RobotsState) LastFetch(host string) time.Time {
 func (rs *RobotsState) WaitDuration(host string) time.Duration {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+
 	delay, ok := rs.crawlDelay[host]
 	if !ok {
 		return 0
 	}
-	last, ok2 := rs.lastFetch[host]
-	if !ok2 {
-		return 0
+
+	if last, ok := rs.lastFetch[host]; ok {
+		elapsed := time.Since(last)
+		if elapsed >= delay {
+			return 0
+		}
+		return delay - elapsed
 	}
-	elapsed := time.Since(last)
-	if elapsed >= delay {
-		return 0
-	}
-	return delay - elapsed
+
+	// If there's no last fetch time, return the full crawl delay
+	return delay
 }
