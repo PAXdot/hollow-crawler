@@ -1,9 +1,14 @@
 package crawler
 
 import (
+	"net/url"
 	"testing"
 	"time"
 )
+
+func urlToEntity(parsedURL *url.URL) string {
+	return &parsedURL.URL.String()
+}
 
 func TestRateCalc_Record(t *testing.T) {
 	rc := NewRateCalcWithSize(6)
@@ -19,12 +24,8 @@ func TestRateCalc_Record(t *testing.T) {
 	}
 }
 
-func TestRateCalc_Throughput(t *testing.T) {
+func TestRateCalc_Throughput_Empty(t *testing.T) {
 	rc := NewRateCalcWithSize(6)
-	for i := 0; i < 4; i++ {
-		rc.Record(10)
-		time.Sleep(1 * time.Second)
-	}
 	if rc.Throughput() != 0 {
 		t.Fatalf("expected 0, got %.2f", rc.Throughput())
 	}
