@@ -9,34 +9,20 @@ import (
 	"time"
 )
 
-// DeduplicationState represents the state of a URL in the deduplication process.
-type DeduplicationState int
-
-const (
-	// UnknownState indicates the initial state of a URL.
-	UnknownState DeduplicationState = iota
-	// PendingState indicates that the URL is waiting to be processed.
-	PendingState
-	// ScrapingState indicates that the URL is being scraped.
-	ScrapingState
-	// ScrapedState indicates that the URL has been successfully scraped.
-	ScrapedState
-	// FailedState indicates that the URL failed to be scraped and should be retried.
-	FailedState
-)
-
-// DeduplicationManager manages the deduplication process of URLs.
+// DeduplicationManager manages the deduplication process of URLs with added
+// channel buffering to prevent blocking.
 type DeduplicationManager struct {
 	mu       sync.Mutex
 	states   map[string]DeduplicationState
-	exportCh chan string
+	exportCh chan struct{ URL string }
 }
 
-// NewDeduplicationManager creates a new DeduplicationManager instance.
-func NewDeduplicationManager(exportCh chan string) *DeduplicationManager {
+// NewDeduplicationManager creates a new DeduplicationManager instance with buffered
+// export channel to prevent blocking.
+func NewDeduplicationManager(exportCh chan struct{ URL string }, buffer int) *DeduplicationManager {
 	return &DeduplicationManager{
 		states:   make(map[string]DeduplicationState),
-		exportCh: exportCh,
+		exportCh: make(chan struct{ URL string }, buffer),
 	}
 }
 
@@ -70,7 +56,7 @@ func (dm *DeduplicationManager) Transition(ctx context.Context, url string, acti
 	case ExportURLAction:
 		if prevState == ScrapedState {
 			select {
-			case dm.exportCh <- url:
+			case dm.exportCh <- struct{ URL string }{URL: url}:
 				return SkipURLAction, nil
 			case <-ctx.Done():
 				return SkipURLAction, ctx.Err()
