@@ -4,12 +4,13 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+	"encoding/json"
 )
 
 // RobotsMetaTag holds the discovered Robots meta tag.
 type RobotsMetaTag struct {
-	NoIndex bool
-	NoFollow bool
+	NoIndex  bool `json:"noindex"`
+	NoFollow bool `json:"nofollow"`
 }
 
 // ParseRobots handles the parsing of Robots meta tag.
@@ -52,4 +53,14 @@ func getAttribute(n *html.Node, attr string) string {
 		return ""
 	}
 	return attrVal
+}
+
+// MarshalJSON customizes the JSON serialization for RobotsMetaTag.
+func (t *RobotsMetaTag) MarshalJSON() ([]byte, error) {
+	type Alias RobotsMetaTag
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(t),
+	})
 }
