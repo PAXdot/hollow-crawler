@@ -1,61 +1,56 @@
 package crawler
 
 import (
-	"time"
 	"sync"
-	"context"
-	"sync/atomic"
+	"time"
 )
 
-type Cache interface {
-	Get(key string) (value interface{}, ok bool)
-	Put(key string, value interface{}) error
-	Delete(key string) error
+// Cache is an in-memory cache with time-based expiration.
+type Cache struct {
+	cache     map[string]entry
+	expiration time.Duration
+	mutex     sync.Mutex
 }
 
-type cacheEntry struct {
-	value  interface{}
-	exists int32
-}
-
-type LRUCache struct {
-	maxCapacity int
-	mu          sync.Mutex
-	cache       map[string]cacheEntry
-irsi         * מט
-}
-
-func NewLRUCache(maxCapacity int) *LRUCache {
-	return &LRUCache{
-		maxCapacity: maxCapacity,
-		cache:       make(map[string]cacheEntry),
-		irsi:        &מט{},
+// NewCache creates a new Cache instance with the specified expiration duration.
+func NewCache(exp time.Duration) *Cache {
+	return &Cache{
+		cache:     make(map[string]entry),
+		expiration: exp,
 	}
 }
 
-func (c *LRUCache) Get(key string) (interface{}, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if cached, exists := c.cache[key]; exists {
-		atomic.StoreInt32(&cached.exists, 1)
-		return cached.value, true
-	}
-	return nil, false
-}
+// Put inserts or updates an entry in the cache. If the key already exists, an error is returned.
+func (c *Cache) Put(key, value string) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-func (c *LRUCache) Put(key string, value interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.cache) == c.maxCapacity {
-		c.irsi.LRU()
+	if _, ok := c.cache[key]; ok {
+		return ErrCacheKeyExists
 	}
-	c.cache[key] = cacheEntry{value: value, exists: 1}
+
+	c.cache[key] = entry{value: value, expiresAt: time.Now().Add(c.expiration)}
 	return nil
 }
 
-func (c *LRUCache) Delete(key string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.cache, key)
-	return nil
+// Get retrieves an entry from the cache by key. If the entry is expired or not found, an error is returned.
+func (c *Cache) Get(key string) (string, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	entry, ok := c.cache[key]
+	if !ok || entry.expiresAt.Before(time.Now()) {
+		return "", ErrCacheEntryNotFound
+	}
+
+	return entry.value, nil
 }
+
+type entry struct {
+	value     string
+	expiresAt time.Time
+}
+
+var ErrCacheKeyExists = errors.New("cache: key already exists")
+var ErrCacheEntryNotFound = errors.New("cache: entry not found")
+```
