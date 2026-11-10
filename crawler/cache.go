@@ -1,6 +1,9 @@
 package crawler
 
 import (
+	"bytes"
+	"encoding/gob"
+	"io"
 	"sync"
 	"time"
 )
@@ -46,6 +49,44 @@ func (c *Cache) Get(key string) (string, error) {
 	return entry.value, nil
 }
 
+// MarshalBinary serializes the cache to a binary format with gob encoding.
+func (c *Cache) MarshalBinary() ([]byte, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	buffer := new(bytes.Buffer)
+	encoder := gob.NewEncoder(buffer)
+	err := encoder.Encode(c.cache)
+	if err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// UnmarshalBinary deserializes the cache from a binary format with gob encoding.
+func (c *Cache) UnmarshalBinary(data []byte) error {
+	buffer := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(buffer)
+	err := decoder.Decode(&c.cache)
+	if err != nil {
+		return err
+	}
+	c.pruneExpiredEntries()
+	return nil
+}
+
+func (c *Cache) pruneExpiredEntries() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+.now := time.Now()
+	for key, entry := range c.cache {
+		if entry.expiresAt.Before(now) {
+			delete(c.cache, key)
+		}
+	}
+}
+
 type entry struct {
 	value     string
 	expiresAt time.Time
@@ -53,4 +94,3 @@ type entry struct {
 
 var ErrCacheKeyExists = errors.New("cache: key already exists")
 var ErrCacheEntryNotFound = errors.New("cache: entry not found")
-```
