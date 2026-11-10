@@ -13,6 +13,7 @@ type CrawlError struct {
 	Inner     error
 }
 
+// Error returns a string representation of the CrawlError.
 func (e *CrawlError) Error() string {
 	return fmt.Sprintf("[%d] %s", e.Code, e.Message)
 }
@@ -40,29 +41,68 @@ func IsRetryable(err *CrawlError) bool {
 // RateLimitError is a convenience constructor for 429-like errors.
 func RateLimitError(wait time.Duration) *CrawlError {
 	return &CrawlError{
-		Code: 429,
-		Message: fmt.Sprintf("rate limited, retry after %v", wait),
-		Retryable: true,
-		Inner: nil,
+		Code:       429,
+		Message:    fmt.Sprintf("rate limited, retry after %v", wait),
+		Retryable:   true,
+		Inner:      nil,
+		RetryAfter: wait,
 	}
 }
 
 // TimeoutError is a convenience constructor for timeout conditions.
 func TimeoutError(url string, dur time.Duration) *CrawlError {
 	return &CrawlError{
-		Code: 408,
-		Message: fmt.Sprintf("timeout fetching %s after %v", url, dur),
+		Code:      408,
+		Message:   fmt.Sprintf("timeout fetching %s after %v", url, dur),
 		Retryable: true,
-		Inner: nil,
+		Inner:     nil,
 	}
 }
 
 // RobotsExcludedError is a convenience constructor for robots.txt denial.
 func RobotsExcludedError(url string) *CrawlError {
 	return &CrawlError{
-		Code: 403,
-		Message: fmt.Sprintf("robots.txt excludes %s", url),
+		Code:      403,
+		Message:   fmt.Sprintf("robots.txt excludes %s", url),
 		Retryable: false,
-		Inner: nil,
+		Inner:     nil,
 	}
+}
+
+// RetryAfter returns the duration until the next retry is allowed for RateLimitError.
+func (e *CrawlError) RetryAfter() time.Duration {
+	if e.Code == 429 {
+		return e.RetryAfter
+	}
+	return 0
+}
+
+// RetryableStats returns statistics about retryable errors.
+// The returned struct contains the total count of retryable errors and the count for each retryable status code.
+type RetryableStats struct {
+	Total         int
+	StatusCodes   map[int]int
+}
+
+var retryableStats = make(map[int]int)
+
+// IncrementRetryableStats increments the statistics for the given error.
+func IncrementRetryableStats(err *CrawlError) {
+	if err.Retryable {
+		retryableStats[err.Code]++
+	}
+}
+
+// TotalRetryableCount returns the total number of retryable errors encountered so far.
+func TotalRetryableCount() int {
+	var total int
+	for _, count := range retryableStats {
+		total += count
+	}
+	return total
+}
+
+// RetryableStatusCodes returns the count of retryable errors for each status code.
+func RetryableStatusCodes() map[int]int {
+	return retryableStats
 }
