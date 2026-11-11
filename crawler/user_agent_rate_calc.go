@@ -5,96 +5,78 @@ import (
 	"time"
 )
 
-// UserAgentRateCalc tracks request throughput per user-agent
-// and reports items/second for each agent in the pool.
-type UserAgentRateCalc struct {
-	mu       sync.Mutex
-	agents   map[string]*agentRecord
-	interval time.Duration // sliding window duration
+// UserAgentThroughputCalculator tracks the request throughput per user-agent
+// and reports the requests per second for each agent in the pool.
+type UserAgentThroughputCalculator struct {
+	mu             sync.Mutex
+	agentsThroughput map[string]throughputRecord
+	interval       time.Duration // sliding window duration
 }
 
-type agentRecord struct {
-	count   int
-	lastSec int64 // unix second of last update
+type throughputRecord struct {
+	total        int
+	lastUpdated  int64 // unix second of last update
+	throughput   float64
 }
 
-// NewUserAgentRateCalc creates a calculator with the given sliding window interval.
+// NewUserAgentThroughputCalculator creates a calculator with the given sliding window interval.
 // interval must be > 0; if zero, the default of 1 second is used.
-func NewUserAgentRateCalc(interval time.Duration) *UserAgentRateCalc {
+func NewUserAgentThroughputCalculator(interval time.Duration) *UserAgentThroughputCalculator {
 	if interval <= 0 {
 		interval = time.Second
 	}
-	return &UserAgentRateCalc{
-		agents:   make(map[string]*agentRecord),
-		interval: interval,
+	return &UserAgentThroughputCalculator{
+		agentsThroughput: make(map[string]throughputRecord),
+		interval:         interval,
 	}
 }
 
-// Increment records one request for the given user-agent.
-func (c *UserAgentRateCalc) Increment(agent string) {
+// IncrementRequest records one request for the given user-agent.
+func (c *UserAgentThroughputCalculator) IncrementRequest(agent string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := time.Now().Unix()
-	r, ok := c.agents[agent]
+	record, ok := c.agentsThroughput[agent]
 	if !ok {
-		c.agents[agent] = &agentRecord{count: 1, lastSec: now}
+		c.agentsThroughput[agent] = throughputRecord{total: 1, lastUpdated: now}
 		return
 	}
-	if now != r.lastSec {
-		// new second, reset count
-		r.count = 1
-		r.lastSec = now
-	} else {
-		r.count++
+	record.total++
+	if now != record.lastUpdated {
+		record.lastUpdated = now
+		record.throughput = float64(record.total) / float64(now-record.lastUpdated)
 	}
 }
 
-// Rate returns the requests/second for the given user-agent in the last interval.
+// Throughput returns the requests per second for the given user-agent in the last interval.
 // If no data exists, it returns 0.
-func (c *UserAgentRateCalc) Rate(agent string) float64 {
+func (c *UserAgentThroughputCalculator) Throughput(agent string) float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	r, ok := c.agents[agent]
+	record, ok := c.agentsThroughput[agent]
 	if !ok {
 		return 0
 	}
-	now := time.Now().Unix()
-	elapsed := now - r.lastSec
-	if elapsed < 0 {
-		elapsed = 0
-	}
-	if elapsed == 0 {
-		return float64(r.count)
-	}
-	return float64(r.count) / float64(elapsed)
+	return record.throughput
 }
 
-// AllRates returns a map of agent -> requests/second for all tracked agents.
-func (c *UserAgentRateCalc) AllRates() map[string]float64 {
+// AllThroughputs returns a map of agent -> requests per second for all tracked agents.
+func (c *UserAgentThroughputCalculator) AllThroughputs() map[string]float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now().Unix()
-	out := make(map[string]float64, len(c.agents))
-	for agent, r := range c.agents {
-		elapsed := now - r.lastSec
-		if elapsed < 0 {
-			elapsed = 0
-		}
-		if elapsed == 0 {
-			out[agent] = float64(r.count)
-		} else {
-			out[agent] = float64(r.count) / float64(elapsed)
-		}
+	out := make(map[string]float64, len(c.agentsThroughput))
+	for agent, record := range c.agentsThroughput {
+		out[agent] = record.throughput
 	}
 	return out
 }
 
 // Reset clears all tracked data.
-func (c *UserAgentRateCalc) Reset() {
+func (c *UserAgentThroughputCalculator) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.agents = make(map[string]*agentRecord)
+	c.agentsThroughput = make(map[string]throughputRecord)
 }
