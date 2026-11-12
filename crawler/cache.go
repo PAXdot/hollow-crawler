@@ -1,96 +1,63 @@
 package crawler
 
 import (
-	"bytes"
-	"encoding/gob"
-	"io"
-	"sync"
+	"context"
+	"errors"
 	"time"
 )
 
-// Cache is an in-memory cache with time-based expiration.
-type Cache struct {
-	cache     map[string]entry
-	expiration time.Duration
-	mutex     sync.Mutex
+const (
+	// CacheExpiration is the default expiration time for cache entries.
+	CacheExpiration = 5 * time.Minute
+)
+
+type Cache interface {
+	Set(key string, value interface{}, expiration time.Duration) error
+	Get(key string) (value interface{}, found bool, err error)
+	Delete(key string) error
 }
 
-// NewCache creates a new Cache instance with the specified expiration duration.
-func NewCache(exp time.Duration) *Cache {
-	return &Cache{
-		cache:     make(map[string]entry),
-		expiration: exp,
-	}
+var ErrCacheEntryExpiredOrNotFound = errors.New("cache entry expired or not found")
+
+type cacheEntry struct {
+	Value      interface{}
+	Expiration time.Time
 }
 
-// Put inserts or updates an entry in the cache. If the key already exists, an error is returned.
-func (c *Cache) Put(key, value string) error {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+// Cache implements the Cache interface.
+type cache struct {
+	entries sync.Map
+}
 
-	if _, ok := c.cache[key]; ok {
-		return ErrCacheKeyExists
+// Set adds an entry to the cache with the given key and expiration time.
+func (c *cache) Set(key string, value interface{}, expiration time.Duration) error {
+	if expiration <= 0 {
+		expiration = CacheExpiration
 	}
-
-	c.cache[key] = entry{value: value, expiresAt: time.Now().Add(c.expiration)}
+	c.entries.Store(key, &cacheEntry{
+		Value:      value,
+		Expiration: time.Now().Add(expiration),
+	})
 	return nil
 }
 
-// Get retrieves an entry from the cache by key. If the entry is expired or not found, an error is returned.
-func (c *Cache) Get(key string) (string, error) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	entry, ok := c.cache[key]
-	if !ok || entry.expiresAt.Before(time.Now()) {
-		return "", ErrCacheEntryNotFound
-	}
-
-	return entry.value, nil
-}
-
-// MarshalBinary serializes the cache to a binary format with gob encoding.
-func (c *Cache) MarshalBinary() ([]byte, error) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	buffer := new(bytes.Buffer)
-	encoder := gob.NewEncoder(buffer)
-	err := encoder.Encode(c.cache)
-	if err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
-}
-
-// UnmarshalBinary deserializes the cache from a binary format with gob encoding.
-func (c *Cache) UnmarshalBinary(data []byte) error {
-	buffer := bytes.NewBuffer(data)
-	decoder := gob.NewDecoder(buffer)
-	err := decoder.Decode(&c.cache)
-	if err != nil {
-		return err
-	}
-	c.pruneExpiredEntries()
-	return nil
-}
-
-func (c *Cache) pruneExpiredEntries() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-.now := time.Now()
-	for key, entry := range c.cache {
-		if entry.expiresAt.Before(now) {
-			delete(c.cache, key)
+// Get retrieves an entry from the cache with the given key.
+func (c *cache) Get(key string) (value interface{}, found bool, err error) {
+	if entry, loaded := c.entries.Load(key); loaded {
+		cacheEntry := entry.(*cacheEntry)
+		if time.Now().After(cacheEntry.Expiration) {
+			c.entries.Delete(key)
+			err = ErrCacheEntryExpiredOrNotFound
+		} else {
+			value = cacheEntry.Value
+			found = true
 		}
 	}
+	return
 }
 
-type entry struct {
-	value     string
-	expiresAt time.Time
+// Delete removes an entry from the cache with the given key.
+func (c *cache) Delete(key string) error {
+	c.entries.Delete(key)
+	return nil
 }
-
-var ErrCacheKeyExists = errors.New("cache: key already exists")
-var ErrCacheEntryNotFound = errors.New("cache: entry not found")
