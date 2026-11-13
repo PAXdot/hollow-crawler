@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,7 @@ var ErrCacheEntryExpiredOrNotFound = errors.New("cache entry expired or not foun
 type cacheEntry struct {
 	Value      interface{}
 	Expiration time.Time
+	Score      int // Add deduplication score to cache entry
 }
 
 // Cache implements the Cache interface.
@@ -29,20 +31,21 @@ type cache struct {
 	entries sync.Map
 }
 
-// Set adds an entry to the cache with the given key and expiration time.
-func (c *cache) Set(key string, value interface{}, expiration time.Duration) error {
+// Set adds an entry to the cache with the given key, value, and expiration time.
+func (c *cache) Set(key string, value interface{}, expiration time.Duration, score int) error {
 	if expiration <= 0 {
 		expiration = CacheExpiration
 	}
 	c.entries.Store(key, &cacheEntry{
 		Value:      value,
 		Expiration: time.Now().Add(expiration),
+		Score:      score, // Store deduplication score
 	})
 	return nil
 }
 
 // Get retrieves an entry from the cache with the given key.
-func (c *cache) Get(key string) (value interface{}, found bool, err error) {
+func (c *cache) Get(key string) (value interface{}, found bool, score int, err error) {
 	if entry, loaded := c.entries.Load(key); loaded {
 		cacheEntry := entry.(*cacheEntry)
 		if time.Now().After(cacheEntry.Expiration) {
@@ -51,6 +54,7 @@ func (c *cache) Get(key string) (value interface{}, found bool, err error) {
 		} else {
 			value = cacheEntry.Value
 			found = true
+			score = cacheEntry.Score // Return deduplication score
 		}
 	}
 	return
